@@ -4,7 +4,7 @@ from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
 from scheduler import start_scheduling
 
 # توکن ربات رو اینجا بذار
-BOT_TOKEN = "توکن‌تو-اینجا"
+BOT_TOKEN = "7922878871:AAGRUsoUOwIV5HnjUsiqharyOAFJs4pnZPY"
 
 logging.basicConfig(level=logging.INFO)
 
