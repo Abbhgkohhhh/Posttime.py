@@ -1,10 +1,21 @@
-import telebot
+import logging
+from telegram import Update
+from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
+from scheduler import start_scheduling
 
-TOKEN = "7922878871:AAGRUsoUOwIV5HnjUsiqharyOAFJs4pnZPY"
-bot = telebot.TeleBot(TOKEN)
+# توکن ربات رو اینجا بذار
+BOT_TOKEN = "توکن‌تو-اینجا"
 
-@bot.message_handler(commands=['start'])
-def send_welcome(message):
-    bot.reply_to(message, "سلام! من ربات همیشه آنلاین هستم.")
+logging.basicConfig(level=logging.INFO)
 
-bot.polling()
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("سلام! من یه ربات گمانه‌زن هستم.")
+
+if __name__ == "__main__":
+    app = ApplicationBuilder().token(BOT_TOKEN).build()
+
+    app.add_handler(CommandHandler("start", start))
+
+    start_scheduling(app)  # اجرای زمان‌بندی پست‌های خودکار
+
+    app.run_polling()
