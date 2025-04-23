@@ -1,1 +1,5 @@
 pyTelegramBotAPI
+python-telegram-bot==20.7
+beautifulsoup4==4.12.3
+requests==2.31.0
+schedule==1.2.1
