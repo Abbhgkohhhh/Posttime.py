@@ -1,21 +1,41 @@
-import logging
-from telegram import Update
-from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
-from scheduler import start_scheduling
+from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
+from telegram.ext import ApplicationBuilder, CommandHandler, CallbackQueryHandler, ContextTypes
 
-# توکن ربات رو اینجا بذار
-BOT_TOKEN = "7922878871:AAGRUsoUOwIV5HnjUsiqharyOAFJs4pnZPY"
+# توکن رباتت اینجا قرار بگیره
+TOKEN = "7922878871:AAGRUsoUOwIV5HnjUsiqharyOAFJs4pnZPY"
 
-logging.basicConfig(level=logging.INFO)
+# دسته‌بندی فروشگاهی
+categories = {
+    "پوشاک": ["@clothingstore1", "@menswear_iran", "@womenfashion_iran"],
+    "اکسسوری": ["@accessoryland", "@bijouterie.ir", "@luxuryaccessories"],
+    "زیبایی": ["@beautystore_ir", "@makeupline", "@skincarecenter"],
+    "غذا": ["@homemadefood", "@iranfoodshop", "@fastfoodmarket"],
+    "کتاب": ["@bookstore_iran", "@ketabforoshi", "@digitalbooks_ir"]
+}
 
+# دستور start برای نمایش دسته‌بندی‌ها
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("سلام! من یه ربات گمانه‌زن هستم.")
+    keyboard = [[InlineKeyboardButton(cat, callback_data=cat)] for cat in categories]
+    await update.message.reply_text(
+        "سلام! دسته‌بندی مورد نظر خودتو انتخاب کن:",
+        reply_markup=InlineKeyboardMarkup(keyboard)
+    )
 
-if __name__ == "__main__":
-    app = ApplicationBuilder().token(BOT_TOKEN).build()
+# هندلر انتخاب دسته و نمایش پیج‌ها
+async def category_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    category = query.data
+    pages = categories.get(category, [])
+    keyboard = [[InlineKeyboardButton(p, url=f"https://instagram.com/{p[1:]}")] for p in pages]
+    await query.edit_message_text(
+        text=f"پیج‌های مربوط به دسته «{category}»:",
+        reply_markup=InlineKeyboardMarkup(keyboard)
+    )
 
-    app.add_handler(CommandHandler("start", start))
+# راه‌اندازی ربات
+app = ApplicationBuilder().token(TOKEN).build()
+app.add_handler(CommandHandler("start", start))
+app.add_handler(CallbackQueryHandler(category_handler))
 
-    start_scheduling(app)  # اجرای زمان‌بندی پست‌های خودکار
-
-    app.run_polling()
+app.run_polling()
