@@ -1,136 +1,115 @@
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import Application, CommandHandler, MessageHandler, filters, CallbackQueryHandler, ContextTypes
+import sqlite3
+from aiogram import Bot, Dispatcher, types
+from aiogram.utils import executor
+from aiogram.contrib.fsm_storage.memory import MemoryStorage
 
-TOKEN = "7922878871:AAGRUsoUOwIV5HnjUsiqharyOAFJs4pnZPY"
+API_TOKEN = '7922878871:AAGRUsoUOwIV5HnjUsiqharyOAFJs4pnZPY'
 
-admin_id = 576916081  # آیدی عددی ادمین
+bot = Bot(token=API_TOKEN)
+dp = Dispatcher(bot, storage=MemoryStorage())
 
-# دیتا ذخیره‌شده
-pending_pages = []  # پیج‌هایی که منتظر تأیید ادمین هستن
-detailed_pages = {}  # دسته‌بندی‌شده با اطلاعات کامل
-rated = {}  # امتیازهای داده‌شده برای جلوگیری از تکرار
+# اتصال به دیتابیس SQLite
+conn = sqlite3.connect('users.db')
+cursor = conn.cursor()
 
-# استارت
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("سلام! برای افزودن پیج از دستور /add استفاده کن.")
+# ساخت جدول کاربران (در صورت نبود)
+cursor.execute('''
+    CREATE TABLE IF NOT EXISTS users (
+        user_id INTEGER PRIMARY KEY,
+        username TEXT,
+        full_name TEXT,
+        phone_number TEXT,
+        score INTEGER DEFAULT 0
+    )
+''')
+conn.commit()
 
-# افزودن پیج
-async def add_page(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("لطفاً به ترتیب اطلاعات زیر رو بنویس:\n"
-                                    "1. آیدی پیج (مثلاً @yourpage)\n"
-                                    "2. دسته‌بندی\n"
-                                    "3. توضیحات کوتاه\n"
-                                    "4. چه چیزهایی می‌فروشید؟\n"
-                                    "همه رو در یک پیام بفرست.")
+# هندلر استارت
+@dp.message_handler(commands=['start'])
+async def start_command(message: types.Message):
+    user_id = message.from_user.id
+    username = message.from_user.username or "NoUsername"
+    full_name = message.from_user.full_name
 
-    context.user_data["adding"] = True
-
-async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if context.user_data.get("adding"):
-        parts = update.message.text.strip().split("\n")
-        if len(parts) < 4:
-            await update.message.reply_text("همه‌ی موارد را کامل بنویس.")
-            return
-        username, category, desc, products = parts[:4]
-        page = {
-            "user_id": update.effective_user.id,
-            "username": username,
-            "category": category,
-            "desc": desc,
-            "products": products,
-            "verified": False,
-            "scores": []
-        }
-        pending_pages.append(page)
-        await context.bot.send_message(admin_id,
-            f"درخواست جدید اضافه کردن پیج:\n"
-            f"آیدی: {username}\n"
-            f"دسته: {category}\n"
-            f"توضیح: {desc}\n"
-            f"محصولات: {products}\n\n"
-            f"برای تأیید:\n/approve {len(pending_pages)-1}")
-        await update.message.reply_text("درخواست شما ثبت شد و در انتظار تأیید ادمین است.")
-        context.user_data["adding"] = False
+    cursor.execute("SELECT * FROM users WHERE user_id=?", (user_id,))
+    if cursor.fetchone() is None:
+        cursor.execute("INSERT INTO users (user_id, username, full_name) VALUES (?, ?, ?)",
+                       (user_id, username, full_name))
+        conn.commit()
+        await message.answer("به ربات خوش آمدی! لطفاً شماره‌ات رو ارسال کن.")
     else:
-        await update.message.reply_text("پیامی نامشخص دریافت شد.")
+        await message.answer("خوش برگشتی! شماره‌ات قبلاً ثبت شده.")
+from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
 
-# تأیید توسط ادمین
-async def approve(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.id != admin_id:
-        await update.message.reply_text("دسترسی ندارید.")
-        return
-    if len(context.args) != 1:
-        await update.message.reply_text("مثال: /approve 0")
-        return
-    idx = int(context.args[0])
-    if idx >= len(pending_pages):
-        await update.message.reply_text("چنین موردی وجود ندارد.")
-        return
-    page = pending_pages.pop(idx)
-    page["verified"] = True
-    detailed_pages.setdefault(page["category"], []).append(page)
-    await update.message.reply_text("پیج تأیید شد و اضافه شد.")
+# کیبورد ارسال شماره تلفن
+request_phone_kb = ReplyKeyboardMarkup(resize_keyboard=True)
+request_phone_kb.add(KeyboardButton("ارسال شماره تلفن", request_contact=True))
 
-# نمایش دسته
-async def show_category(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if len(context.args) != 1:
-        await update.message.reply_text("فرمت: /show دسته")
-        return
-    category = context.args[0]
-    if category not in detailed_pages or not detailed_pages[category]:
-        await update.message.reply_text("هیچ پیجی در این دسته نیست.")
-        return
-    for page in detailed_pages[category]:
-        avg_score = round(sum(page["scores"]) / len(page["scores"]), 2) if page["scores"] else "ثبت نشده"
-        verified_str = "✅ مطمئن" if page["verified"] else "❌ نامطمئن"
-        text = (
-            f"{page['username']}\n"
-            f"توضیح: {page['desc']}\n"
-            f"محصولات: {page['products']}\n"
-            f"وضعیت: {verified_str}\n"
-            f"میانگین امتیاز: {avg_score}"
-        )
-        keyboard = InlineKeyboardMarkup([
-            [InlineKeyboardButton("بازدید از پیج", url=f"https://t.me/{page['username'].strip('@')}")],
-            [
-                InlineKeyboardButton("امتیاز 1", callback_data=f"rate|{page['username']}|1"),
-                InlineKeyboardButton("امتیاز 2", callback_data=f"rate|{page['username']}|2"),
-                InlineKeyboardButton("امتیاز 3", callback_data=f"rate|{page['username']}|3"),
-                InlineKeyboardButton("امتیاز 4", callback_data=f"rate|{page['username']}|4"),
-                InlineKeyboardButton("امتیاز 5", callback_data=f"rate|{page['username']}|5"),
-            ]
-        ])
-        await update.message.reply_text(text, reply_markup=keyboard)
+@dp.message_handler(lambda message: not message.contact and message.text == "ارسال شماره تلفن")
+async def ask_for_phone(message: types.Message):
+    await message.answer("لطفاً با دکمه زیر شماره‌ات رو بفرست:", reply_markup=request_phone_kb)
 
-# هندلر امتیازدهی
-async def handle_rating_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-    data = query.data.split("|")
-    if len(data) != 3 or data[0] != "rate":
-        return
-    username = data[1]
-    score = int(data[2])
-    user_key = str(query.from_user.id) + "_" + username
-    if rated.get(user_key):
-        await query.edit_message_reply_markup()
-        await query.message.reply_text("شما قبلاً امتیاز داده‌اید.")
-        return
-    for pages in detailed_pages.values():
-        for page in pages:
-            if page["username"] == username:
-                page["scores"].append(score)
-                rated[user_key] = True
-                await query.message.reply_text("امتیاز ثبت شد. ممنون!")
-                return
+@dp.message_handler(content_types=types.ContentType.CONTACT)
+async def handle_contact(message: types.Message):
+    user_id = message.from_user.id
+    phone_number = message.contact.phone_number
 
-# اجرای ربات
-if __name__ == "__main__":
-    app = Application.builder().token(TOKEN).build()
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("add", add_page))
-    app.add_handler(CommandHandler("approve", approve))
-    app.add_handler(CommandHandler("show", show_category))
-    app.add_handler(CallbackQueryHandler(handle_rating_callback))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
-    app.run_polling()
+    cursor.execute("UPDATE users SET phone_number = ? WHERE user_id = ?", (phone_number, user_id))
+    conn.commit()
+
+    await message.answer("شماره تلفن با موفقیت ثبت شد!", reply_markup=types.ReplyKeyboardRemove())
+    await show_main_menu(message)
+
+# منوی اصلی
+def main_menu():
+    markup = ReplyKeyboardMarkup(resize_keyboard=True)
+    markup.add("مشاهده امتیاز", "دعوت از دوستان")
+    return markup
+
+async def show_main_menu(message):
+    await message.answer("چه کاری می‌خوای انجام بدی؟", reply_markup=main_menu())
+
+# نمایش امتیاز
+@dp.message_handler(lambda message: message.text == "مشاهده امتیاز")
+async def show_score(message: types.Message):
+    user_id = message.from_user.id
+    cursor.execute("SELECT score FROM users WHERE user_id = ?", (user_id,))
+    result = cursor.fetchone()
+    if result:
+        await message.answer(f"امتیاز فعلی شما: {result[0]}")
+    else:
+        await message.answer("کاربر یافت نشد.")
+        # سیستم دعوت از دوستان
+@dp.message_handler(lambda message: message.text == "دعوت از دوستان")
+async def invite_friends(message: types.Message):
+    user_id = message.from_user.id
+    invite_link = f"https://t.me/{(await bot.get_me()).username}?start={user_id}"
+    await message.answer(f"با ارسال این لینک به دوستات، امتیاز بگیر:\n\n{invite_link}")
+
+# ثبت امتیاز دعوت
+@dp.message_handler(commands=['start'])
+async def handle_start(message: types.Message):
+    user_id = message.from_user.id
+    args = message.get_args()
+
+    # بررسی اینکه کاربر وجود داره یا نه
+    cursor.execute("SELECT * FROM users WHERE user_id = ?", (user_id,))
+    user_exists = cursor.fetchone()
+
+    if not user_exists:
+        cursor.execute("INSERT INTO users (user_id) VALUES (?)", (user_id,))
+        conn.commit()
+
+        # بررسی وجود معرف
+        if args.isdigit():
+            referrer_id = int(args)
+            if referrer_id != user_id:
+                cursor.execute("UPDATE users SET score = score + 1 WHERE user_id = ?", (referrer_id,))
+                conn.commit()
+                await bot.send_message(referrer_id, "یک نفر با لینک شما عضو شد و امتیاز گرفتید!")
+
+    await message.answer("خوش آمدی!", reply_markup=main_menu())
+
+# اجرای بات
+if __name__ == '__main__':
+    executor.start_polling(dp, skip_updates=True)
