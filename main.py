@@ -1,24 +1,26 @@
 # main.py
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, filters
+
+from handlers.start_handler import start
+from handlers.add_handler import add_page, handle_text
+from handlers.approve_handler import approve
+from handlers.show_handler import show_category
+from handlers.rate_handler import handle_rating_callback
+from handlers.help_handler import help_command
+
 from config import TOKEN
-from handlers import (
-    start_handler,
-    add_handler,
-    approve_handler,
-    show_handler,
-    rate_handler,
-    help_handler
-)
 
-app = Application.builder().token(TOKEN).build()
+if __name__ == "__main__":
+    app = Application.builder().token(TOKEN).build()
 
-# ثبت هندلرها
-app.add_handler(CommandHandler("start", start_handler.start))
-app.add_handler(CommandHandler("add", add_handler.add_page))
-app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, add_handler.handle_text))
-app.add_handler(CommandHandler("approve", approve_handler.approve))
-app.add_handler(CommandHandler("show", show_handler.show_category))
-app.add_handler(CallbackQueryHandler(rate_handler.handle_rating_callback))
-app.add_handler(CommandHandler("help", help_handler.help_command))
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("add", add_page))
+    app.add_handler(CommandHandler("approve", approve))
+    app.add_handler(CommandHandler("show", show_category))
+    app.add_handler(CommandHandler("help", help_command))
 
-app.run_polling()
+    app.add_handler(CallbackQueryHandler(handle_rating_callback))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
+
+    print("ربات در حال اجراست...")
+    app.run_polling()
