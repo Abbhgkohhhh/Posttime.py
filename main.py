@@ -1,23 +1,18 @@
-import logging
-from aiogram import Bot, Dispatcher, types
-from aiogram.types import ParseMode, InputTextMessageContent
-from aiogram.utils import executor
+import os
 import sqlite3
-import time
+from aiogram import Bot, Dispatcher, types
+from aiogram.types import ParseMode
+from aiogram.utils import executor
 
-API_TOKEN = '7922878871:AAGRUsoUOwIV5HnjUsiqharyOAFJs4pnZPY'  # توکن بات خودت رو وارد کن
-ADMIN_ID = 576916081  # آیدی عددی ادمین (این رو با آیدی خودت جایگزین کن)
-
-logging.basicConfig(level=logging.INFO)
-
-bot = Bot(token=API_TOKEN)
-dp = Dispatcher(bot)
+# تنظیمات متغیرهای محیطی برای توکن و آیدی ادمین
+API_TOKEN = os.getenv('7922878871:AAGRUsoUOwIV5HnjUsiqharyOAFJs4pnZPY')  # توکن بات از متغیر محیطی
+ADMIN_ID = int(os.getenv('576916081'))  # آیدی ادمین از متغیر محیطی
 
 # اتصال به دیتابیس SQLite
 conn = sqlite3.connect('user_data.db')
 cursor = conn.cursor()
 
-# ایجاد جدول کاربران اگر وجود نداشته باشد
+# ایجاد جدول کاربران در صورت نبود
 cursor.execute('''
 CREATE TABLE IF NOT EXISTS users (
     user_id INTEGER PRIMARY KEY,
@@ -26,88 +21,99 @@ CREATE TABLE IF NOT EXISTS users (
 ''')
 conn.commit()
 
-# صفحه اصلی منو
-def main_menu():
-    markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
-    item1 = types.KeyboardButton("دعوت از دوستان")
-    markup.add(item1)
-    return markup
-    # سیستم دعوت از دوستان
-@dp.message_handler(lambda message: message.text == "دعوت از دوستان")
-async def invite_friends(message: types.Message):
-    user_id = message.from_user.id
-    invite_link = f"https://t.me/{(await bot.get_me()).username}?start={user_id}"
-    await message.answer(f"با ارسال این لینک به دوستات، امتیاز بگیر:\n\n{invite_link}")
+# ایجاد شی Bot و Dispatcher
+bot = Bot(token=API_TOKEN)
+dp = Dispatcher(bot)
 
-# ثبت امتیاز دعوت
+# فرمان /start
 @dp.message_handler(commands=['start'])
-async def handle_start(message: types.Message):
+async def cmd_start(message: types.Message):
     user_id = message.from_user.id
-    args = message.get_args()
-
-    # بررسی اینکه کاربر وجود داره یا نه
-    cursor.execute("SELECT * FROM users WHERE user_id = ?", (user_id,))
-    user_exists = cursor.fetchone()
-
-    if not user_exists:
-        cursor.execute("INSERT INTO users (user_id) VALUES (?)", (user_id,))
+    
+    # بررسی اینکه آیا کاربر قبلاً در دیتابیس ثبت شده است یا خیر
+    cursor.execute("SELECT * FROM users WHERE user_id=?", (user_id,))
+    user = cursor.fetchone()
+    
+    if user is None:
+        # اگر کاربر در دیتابیس وجود نداشت، یک رکورد جدید ایجاد می‌کنیم
+        cursor.execute("INSERT INTO users (user_id, score) VALUES (?, ?)", (user_id, 0))
         conn.commit()
+        await message.reply("سلام! من ربات شما هستم. شما هم‌اکنون ثبت‌نام شدید.")
+    else:
+        await message.reply("سلام! خوش آمدید، شما قبلاً ثبت‌نام کرده‌اید.")
+    
+# فرمان /score برای دریافت امتیاز کاربر
+@dp.message_handler(commands=['score'])
+async def cmd_score(message: types.Message):
+    user_id = message.from_user.id
+    
+    # دریافت امتیاز کاربر از دیتابیس
+    cursor.execute("SELECT score FROM users WHERE user_id=?", (user_id,))
+    user = cursor.fetchone()
+    
+    if user is None:
+        await message.reply("شما هنوز ثبت‌نام نکرده‌اید. از دستور /start برای ثبت‌نام استفاده کنید.")
+    else:
+        await message.reply(f"امتیاز شما: {user[0]}")
 
-        # بررسی وجود معرف
-        if args.isdigit():
-            referrer_id = int(args)
-            if referrer_id != user_id:
-                cursor.execute("UPDATE users SET score = score + 1 WHERE user_id = ?", (referrer_id,))
-                conn.commit()
-                await bot.send_message(referrer_id, "یک نفر با لینک شما عضو شد و امتیاز گرفتید!")
-    await message.answer("خوش آمدی!", reply_markup=main_menu())
-# دستورات مدیریتی (فقط برای ادمین)
+# فرمان /admin فقط برای ادمین
 @dp.message_handler(commands=['admin'])
-async def admin_commands(message: types.Message):
-    user_id = message.from_user.id
-    if user_id == ADMIN_ID:
-        await message.answer("سلام ادمین! خوش آمدید.\nدر اینجا می‌تونید دستورات مدیریتی رو اجرا کنید.")
-        
-        # اضافه کردن دستورات مدیریتی مانند:
-        markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
-        item1 = types.KeyboardButton("مشاهده آمار کاربران")
-        item2 = types.KeyboardButton("حذف کاربر")
-        markup.add(item1, item2)
-        await message.answer("دستورات مدیریتی:", reply_markup=markup)
+async def cmd_admin(message: types.Message):
+    if message.from_user.id == ADMIN_ID:
+        await message.reply("سلام ادمین! خوش آمدید.")
     else:
-        await message.answer("شما دسترسی به دستورات مدیریتی ندارید.")
-        # مشاهده آمار کاربران
-@dp.message_handler(lambda message: message.text == "مشاهده آمار کاربران")
-async def show_user_stats(message: types.Message):
-    user_id = message.from_user.id
-    if user_id == ADMIN_ID:
-        cursor.execute("SELECT user_id, score FROM users")
-        users = cursor.fetchall()
-        
-        stats = "آمار کاربران:\n"
-        for user in users:
-            stats += f"کاربر {user[0]}: {user[1]} امتیاز\n"
-        
-        await message.answer(stats)
-    else:
-        await message.answer("شما دسترسی به این بخش را ندارید.")
+        await message.reply("شما دسترسی به این فرمان ندارید.")
 
-# حذف کاربر
-@dp.message_handler(lambda message: message.text == "حذف کاربر")
-async def delete_user(message: types.Message):
-    user_id = message.from_user.id
-    if user_id == ADMIN_ID:
-        await message.answer("لطفاً آیدی کاربری که می‌خواهید حذف کنید وارد کنید:")
-        
-        @dp.message_handler(lambda msg: msg.text.isdigit())
-        async def process_user_id(msg: types.Message):
-            target_user_id = int(msg.text)
-            cursor.execute("DELETE FROM users WHERE user_id = ?", (target_user_id,))
+# فرمان /addscore برای ادمین (افزایش امتیاز کاربران)
+@dp.message_handler(commands=['addscore'])
+async def cmd_addscore(message: types.Message):
+    if message.from_user.id == ADMIN_ID:
+        # استخراج آیدی کاربر و امتیاز جدید از پیام
+        try:
+            parts = message.text.split()
+            target_user_id = int(parts[1])  # آیدی کاربر هدف
+            score_to_add = int(parts[2])    # امتیاز افزوده‌شده
+            
+            # به روز رسانی امتیاز کاربر
+            cursor.execute("UPDATE users SET score = score + ? WHERE user_id = ?", (score_to_add, target_user_id))
             conn.commit()
-            await msg.answer(f"کاربر با آیدی {target_user_id} حذف شد.")
+            
+            await message.reply(f"امتیاز کاربر {target_user_id} به میزان {score_to_add} افزایش یافت.")
+        except (IndexError, ValueError):
+            await message.reply("فرمت دستور اشتباه است. لطفاً از دستور به شکل زیر استفاده کنید:\n/addscore <user_id> <score>")
     else:
-        await message.answer("شما دسترسی به این بخش را ندارید.")
-        # اجرای بات
+        await message.reply("شما دسترسی به این فرمان ندارید.")
+
+# فرمان /resetscore برای ادمین (بازنشانی امتیاز کاربران)
+@dp.message_handler(commands=['resetscore'])
+async def cmd_resetscore(message: types.Message):
+    if message.from_user.id == ADMIN_ID:
+        try:
+            parts = message.text.split()
+            target_user_id = int(parts[1])  # آیدی کاربر هدف
+            
+            # بازنشانی امتیاز کاربر
+            cursor.execute("UPDATE users SET score = 0 WHERE user_id = ?", (target_user_id,))
+            conn.commit()
+            
+            await message.reply(f"امتیاز کاربر {target_user_id} به صفر بازنشانی شد.")
+        except (IndexError, ValueError):
+            await message.reply("فرمت دستور اشتباه است. لطفاً از دستور به شکل زیر استفاده کنید:\n/resetscore <user_id>")
+    else:
+        await message.reply("شما دسترسی به این فرمان ندارید.")
+
+# فرمان /help برای نمایش دستورات
+@dp.message_handler(commands=['help'])
+async def cmd_help(message: types.Message):
+    help_text = (
+        "دستورات موجود:\n"
+        "/start - شروع کار با ربات\n"
+        "/score - مشاهده امتیاز خود\n"
+        "/admin - فقط برای ادمین\n"
+        "/addscore <user_id> <score> - افزودن امتیاز به کاربر (فقط برای ادمین)\n"
+        "/resetscore <user_id> - بازنشانی امتیاز کاربر به صفر (فقط برای ادمین)"
+    )
+    await message.reply(help_text)
+
 if __name__ == '__main__':
     executor.start_polling(dp, skip_updates=True)
-    
