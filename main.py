@@ -1,91 +1,151 @@
-import os
-from aiogram import Bot, Dispatcher, types
-from aiogram.utils import executor
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import Application, CommandHandler, MessageHandler, filters, CallbackQueryHandler, ContextTypes
 
-API_TOKEN = "7922878871:AAGRUsoUOwIV5HnjUsiqharyOAFJs4pnZPY"
-ADMIN_ID   = 576916081
+TOKEN = "7922878871:AAGRUsoUOwIV5HnjUsiqharyOAFJs4pnZPY"
 
-bot = Bot(token=API_TOKEN)
-dp  = Dispatcher(bot)
+admin_id = 576916081  # آیدی عددی ادمین
 
-# داده‌ها در حافظه
-categories = {}   # { "دسته": "توضیحات" }
-pages      = {}   # { "پیج": "لینک" }
+# دیتا ذخیره‌شده
+pending_pages = []  # پیج‌هایی که منتظر تأیید ادمین هستن
+detailed_pages = {}  # دسته‌بندی‌شده با اطلاعات کامل
+rated = {}  # امتیازهای داده‌شده برای جلوگیری از تکرار
 
-HELP_TEXT = """
-دستورات:
-🛠️ /addcategory نام|توضیحات    (ادمین)
-🗑️ /delcategory نام              (ادمین)
-📋 /listcategories               
+# استارت
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("سلام! برای افزودن پیج از دستور /add استفاده کن.")
 
-🛠️ /addpage نام|لینک            (ادمین)
-🗑️ /delpage نام                  (ادمین)
-📋 /listpages                   
+# افزودن پیج
+async def add_page(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("لطفاً به ترتیب اطلاعات زیر رو بنویس:\n"
+                                    "1. آیدی پیج (مثلاً @yourpage)\n"
+                                    "2. دسته‌بندی\n"
+                                    "3. توضیحات کوتاه\n"
+                                    "4. چه چیزهایی می‌فروشید؟\n"
+                                    "همه رو در یک پیام بفرست.")
 
-ℹ️ /help
-"""
+    context.user_data["adding"] = True
 
-@dp.message_handler(commands=["start","help"])
-async def cmd_help(msg: types.Message):
-    await msg.reply(HELP_TEXT)
-
-@dp.message_handler(commands=["addcategory"])
-async def cmd_addcat(msg: types.Message):
-    if msg.from_user.id != ADMIN_ID:
-        return await msg.reply("⛔️ دسترسی ندارید.")
-    try:
-        name, desc = msg.text.split(" ",1)[1].split("|",1)
-        categories[name.strip()] = desc.strip()
-        await msg.reply(f"✅ دسته «{name.strip()}» اضافه شد.")
-    except:
-        await msg.reply("❌ فرمت اشتباه!\nمثال: /addcategory پوشاک|لباس مردانه و زنانه")
-
-@dp.message_handler(commands=["delcategory"])
-async def cmd_delcat(msg: types.Message):
-    if msg.from_user.id != ADMIN_ID:
-        return await msg.reply("⛔️ دسترسی ندارید.")
-    name = msg.text.split(" ",1)[1].strip() if " " in msg.text else ""
-    if name in categories:
-        categories.pop(name)
-        await msg.reply(f"✅ دسته «{name}» حذف شد.")
+async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if context.user_data.get("adding"):
+        parts = update.message.text.strip().split("\n")
+        if len(parts) < 4:
+            await update.message.reply_text("همه‌ی موارد را کامل بنویس.")
+            return
+        username, category, desc, products = parts[:4]
+        page = {
+            "user_id": update.effective_user.id,
+            "username": username,
+            "category": category,
+            "desc": desc,
+            "products": products,
+            "verified": False,
+            "scores": []
+        }
+        pending_pages.append(page)
+        await context.bot.send_message(admin_id,
+            f"درخواست جدید اضافه کردن پیج:\n"
+            f"آیدی: {username}\n"
+            f"دسته: {category}\n"
+            f"توضیح: {desc}\n"
+            f"محصولات: {products}\n\n"
+            f"برای تأیید:\n/approve {len(pending_pages)-1}")
+        await update.message.reply_text("درخواست شما ثبت شد و در انتظار تأیید ادمین است.")
+        context.user_data["adding"] = False
     else:
-        await msg.reply("❌ چنین دسته‌ای وجود ندارد.")
+        await update.message.reply_text("پیامی نامشخص دریافت شد.")
 
-@dp.message_handler(commands=["listcategories"])
-async def cmd_listcat(msg: types.Message):
-    if not categories:
-        return await msg.reply("ℹ️ هیچ دسته‌ای ثبت نشده.")
-    text = "📂 دسته‌بندی‌ها:\n" + "\n".join(f"• {n}: {d}" for n,d in categories.items())
-    await msg.reply(text)
+# تأیید توسط ادمین
+async def approve(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id != admin_id:
+        await update.message.reply_text("دسترسی ندارید.")
+        return
+    if len(context.args) != 1:
+        await update.message.reply_text("مثال: /approve 0")
+        return
+    idx = int(context.args[0])
+    if idx >= len(pending_pages):
+        await update.message.reply_text("چنین موردی وجود ندارد.")
+        return
+    page = pending_pages.pop(idx)
+    page["verified"] = True
+    detailed_pages.setdefault(page["category"], []).append(page)
+    await update.message.reply_text("پیج تأیید شد و اضافه شد.")
 
-@dp.message_handler(commands=["addpage"])
-async def cmd_addpage(msg: types.Message):
-    if msg.from_user.id != ADMIN_ID:
-        return await msg.reply("⛔️ دسترسی ندارید.")
-    try:
-        name, url = msg.text.split(" ",1)[1].split("|",1)
-        pages[name.strip()] = url.strip()
-        await msg.reply(f"✅ پیج «{name.strip()}» اضافه شد.")
-    except:
-        await msg.reply("❌ فرمت اشتباه!\nمثال: /addpage myshop|https://instagram.com/myshop")
+# نمایش دسته
+async def show_category(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if len(context.args) != 1:
+        await update.message.reply_text("فرمت: /show دسته")
+        return
+    category = context.args[0]
+    if category not in detailed_pages or not detailed_pages[category]:
+        await update.message.reply_text("هیچ پیجی در این دسته نیست.")
+        return
+    for page in detailed_pages[category]:
+        avg_score = round(sum(page["scores"]) / len(page["scores"]), 2) if page["scores"] else "ثبت نشده"
+        verified_str = "✅ مطمئن" if page["verified"] else "❌ نامطمئن"
+        text = (
+            f"{page['username']}\n"
+            f"توضیح: {page['desc']}\n"
+            f"محصولات: {page['products']}\n"
+            f"وضعیت: {verified_str}\n"
+            f"میانگین امتیاز: {avg_score}"
+        )
+        keyboard = InlineKeyboardMarkup([
+            [InlineKeyboardButton("بازدید از پیج", url=f"https://t.me/{page['username'].strip('@')}")],
+            [
+                InlineKeyboardButton("امتیاز 1", callback_data=f"rate|{page['username']}|1"),
+                InlineKeyboardButton("امتیاز 2", callback_data=f"rate|{page['username']}|2"),
+                InlineKeyboardButton("امتیاز 3", callback_data=f"rate|{page['username']}|3"),
+                InlineKeyboardButton("امتیاز 4", callback_data=f"rate|{page['username']}|4"),
+                InlineKeyboardButton("امتیاز 5", callback_data=f"rate|{page['username']}|5"),
+            ]
+        ])
+        await update.message.reply_text(text, reply_markup=keyboard)
 
-@dp.message_handler(commands=["delpage"])
-async def cmd_delpage(msg: types.Message):
-    if msg.from_user.id != ADMIN_ID:
-        return await msg.reply("⛔️ دسترسی ندارید.")
-    name = msg.text.split(" ",1)[1].strip() if " " in msg.text else ""
-    if name in pages:
-        pages.pop(name)
-        await msg.reply(f"✅ پیج «{name}» حذف شد.")
-    else:
-        await msg.reply("❌ چنین پیجی وجود ندارد.")
+# هندلر امتیازدهی
+async def handle_rating_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    data = query.data.split("|")
+    if len(data) != 3 or data[0] != "rate":
+        return
+    username = data[1]
+    score = int(data[2])
+    user_key = str(query.from_user.id) + "_" + username
+    if rated.get(user_key):
+        await query.edit_message_reply_markup()
+        await query.message.reply_text("شما قبلاً امتیاز داده‌اید.")
+        return
+    for pages in detailed_pages.values():
+        for page in pages:
+            if page["username"] == username:
+                page["scores"].append(score)
+                rated[user_key] = True
+                await query.message.reply_text("امتیاز ثبت شد. ممنون!")
+                return
 
-@dp.message_handler(commands=["listpages"])
-async def cmd_listp(msg: types.Message):
-    if not pages:
-        return await msg.reply("ℹ️ هیچ پیجی ثبت نشده.")
-    text = "📸 پیج‌ها:\n" + "\n".join(f"• {n}: {u}" for n,u in pages.items())
-    await msg.reply(text)
+# راهنمای کلیدها
+async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    text = (
+        "**راهنمای ربات فروشگاهی:**\n\n"
+        "/start - شروع استفاده از ربات\n"
+        "/add - افزودن پیج جدید (برای ثبت فروشگاهت)\n"
+        "/show دسته - نمایش فروشگاه‌های هر دسته\n"
+        "/approve شماره - (فقط ادمین) تأیید پیج\n\n"
+        "وقتی روی دکمه‌های زیر پیج‌ها کلیک می‌کنی:\n"
+        "- دکمه 'بازدید از پیج' تو رو می‌بره به کانال یا فروشگاه\n"
+        "- دکمه‌های 'امتیاز ۱ تا ۵' برای امتیاز دادن هستن (فقط یکبار می‌تونی رای بدی)\n"
+    )
+    await update.message.reply_text(text, parse_mode="Markdown")
 
+# اجرای ربات
 if __name__ == "__main__":
-    executor.start_polling(dp, skip_updates=True)
+    application = Application.builder().token(TOKEN).build()
+    application.add_handler(CommandHandler("start", start))
+    application.add_handler(CommandHandler("add", add_page))
+    application.add_handler(CommandHandler("approve", approve))
+    application.add_handler(CommandHandler("show", show_category))
+    application.add_handler(CommandHandler("help", help_command))
+    application.add_handler(CallbackQueryHandler(handle_rating_callback))
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
+    application.run_polling()
